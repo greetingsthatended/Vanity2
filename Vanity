@@ -1,0 +1,963 @@
+getgenv().Vanity = {
+    Key = '',
+    ['Mode'] = {
+        ['Target Mode'] = "Target", 
+        ['Type'] = "Toggle",
+        ['Binds'] = "M"
+    },
+    ['SilentAim'] = {
+        ['Enabled'] = true,
+        ['Binds'] = "Q",
+        ['HitPart'] = "HumanoidRootPart",
+        ['HealthCheck'] = true,
+        ['KnifeCheck'] = true,
+        ['Target Lines'] = {
+            ['Visible'] = true,
+            ['Regular'] = Color3.fromRGB(255, 0, 0)
+        },
+        ['WallCheck'] = true,
+        ['Prediction'] = {
+            ['Enabled'] = true,
+            ['X'] = 0,
+            ['Y'] = 0,
+            ['Z'] = 0
+        },
+        ['Predictions'] = {
+            ['Enabled'] = true,
+            ['ToggleKey'] = "N",
+            ['Amount'] = 0
+        },
+        ['FOV'] = { 
+            ['Enabled'] = true,
+            ['Visible'] = false,
+            ['Scan'] = math.huge,
+
+            ['Mode'] = '2D', 
+
+            ['2D'] = {
+                ['X'] = 50,
+                ['Y'] = 50,
+            },
+            ['3D'] = {
+                ['Prediction'] = false,
+                ['X'] = 50,
+                ['Y'] = 50,
+                ['Z'] = 50,
+            },
+        },
+    },
+    ['Camlock'] = {
+        ['Enabled'] = false,
+        ['Binds'] = "C", 
+        ['Time'] = 0.065, 
+        ['HitPart'] = "HumanoidRootPart",
+        ['HealthCheck'] = true,
+        ['KnifeCheck'] = true,
+        ['WallCheck'] = true,
+        ['Prediction'] = {
+            ['Enabled'] = true,
+            ['X'] = 0.24434,
+            ['Y'] = 0.24434,
+            ['Z'] = 0.24434
+        }
+    },
+    ['TriggerBot'] = {
+        ['Enabled'] = true,
+        ['Binds'] = "T", 
+        ['Delay'] = 0.01,
+        ['Prediction'] = {
+            ['Enabled'] = true,
+            ['X'] = 0.1,
+            ['Y'] = 0.1,
+            ['Z'] = 0.1
+        },
+        ['WallCheck'] = true,
+        ['HealthCheck'] = true,
+        ['KnifeCheck'] = true,
+    },
+    ['WalkSpeed'] = {
+        ['Enabled'] = false,
+        ['Binds'] = "V",
+        ['Speed'] = 1700
+    }
+}
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Camera = workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+local executor = game.Players.LocalPlayer.UserId
+
+if getgenv().Vanity._cleanup then
+    pcall(getgenv().Vanity._cleanup)
+end
+
+local fovConfig = Vanity.SilentAim.FOV
+if fovConfig.Enabled then
+    if fovConfig.Mode == "2D" then
+        local radiusX = fovConfig["2D"].X
+        local radiusY = fovConfig["2D"].Y
+
+    elseif fovConfig.Mode == "3D" then
+        local distX = fovConfig["3D"].X
+        local distY = fovConfig["3D"].Y
+        local distZ = fovConfig["3D"].Z
+    end
+end
+
+local silentAimConnection
+local camlockConnection
+local camlockToggleConnection
+local triggerBotConnection
+local triggerBotToggleConnection
+local walkSpeedConnection
+local originalIndex
+local isShooting = false
+local isCamlockToggled = false
+local camlockTween
+local camlockTarget = { 
+    Player = nil, 
+    TargetPart = nil, 
+    IsClosestPoint = false 
+}
+
+_G.WS = 16
+_G.JP = 50 
+
+local _private_ = {
+    _cleanup = nil,
+    _metatableHooked = false
+}
+
+local function IsHoldingKnife(checkType)
+    local config = Vanity[checkType]
+    if not config.KnifeCheck then
+        return false
+    end
+    local Character = LocalPlayer.Character
+    if not Character then
+        return false
+    end
+    local Tool = Character:FindFirstChildOfClass("Tool")
+    if not Tool then
+        return false
+    end
+    if checkType == "SilentAim" or checkType == "Camlock" then
+        local isKnife = Tool.Name:lower():find("knife") ~= nil
+        return isKnife
+    elseif checkType == "TriggerBot" then
+        local isKnife = Tool.Name:lower():find("knife") ~= nil
+        local hasAmmo = Tool:FindFirstChild("Ammo") or Tool:FindFirstChild("ClipAmmo")
+        local isEmpty = false
+        if hasAmmo then
+            local ammoValue = Tool:FindFirstChild("Ammo") and Tool.Ammo.Value or (Tool:FindFirstChild("ClipAmmo") and Tool.ClipAmmo.Value or 0)
+            isEmpty = ammoValue == 0
+        end
+        return isKnife or (hasAmmo and isEmpty)
+    end
+    return false
+end
+
+local function IsOccluded(Target, Character, checkType, IsClosestPoint)
+    local config = Vanity[checkType]
+    if not config.WallCheck or not Target or not Character then
+        return false
+    end
+    local cameraPosition = Camera.CFrame.Position
+    local targetPosition = IsClosestPoint and Target or Target.Position
+    local ignoreList = {LocalPlayer.Character, Character}
+    local validParts = {}
+    for _, obj in ipairs(ignoreList) do
+        if obj then
+            table.insert(validParts, obj)
+        end
+    end
+    local obstructingParts = Camera:GetPartsObscuringTarget({targetPosition}, validParts)
+    return #obstructingParts > 0
+end
+
+local function GetClosestPart(Character, MousePosition)
+    local ClosestDistance, ClosestPart = math.huge, nil
+    local Parts = {
+        "Head", "HumanoidRootPart", 
+        "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg", 
+        "UpperTorso", "LowerTorso", 
+        "LeftUpperArm", "LeftLowerArm", "LeftHand",
+        "RightUpperArm", "RightLowerArm", "RightHand",
+        "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+        "RightUpperLeg", "RightLowerLeg", "RightFoot"
+    }
+    for _, PartName in ipairs(Parts) do
+        local Part = Character:FindFirstChild(PartName)
+        if Part then
+            local ScreenPosition, Visible = Camera:WorldToViewportPoint(Part.Position)
+            if Visible then
+                local Distance = (MousePosition - Vector2.new(ScreenPosition.X, ScreenPosition.Y)).Magnitude
+                if Distance < ClosestDistance then
+                    ClosestDistance, ClosestPart = Distance, Part
+                end
+            end
+        end
+    end
+    return ClosestPart
+end
+local function GetRandomPart(Character)
+    local Parts = {
+        "Head", "HumanoidRootPart", 
+        "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg", 
+        "UpperTorso", "LowerTorso", 
+        "LeftUpperArm", "LeftLowerArm", "LeftHand",
+        "RightUpperArm", "RightLowerArm", "RightHand",
+        "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+        "RightUpperLeg", "RightLowerLeg", "RightFoot"
+    }
+    local ValidParts = {}
+    for _, PartName in ipairs(Parts) do
+        local Part = Character:FindFirstChild(PartName)
+        if Part then
+            table.insert(ValidParts, Part)
+        end
+    end
+    if #ValidParts > 0 then
+        return ValidParts[math.random(1, #ValidParts)]
+    end
+    return nil
+end
+
+local function GetClosestPointOnPart(Part, MousePosition)
+    local success, screenPos, onScreen = pcall(function()
+        return Camera:WorldToScreenPoint(Part.Position)
+    end)
+    if not success or not onScreen then
+        return Part.Position 
+    end
+
+    local mouseWorldPos = Camera:ScreenPointToRay(MousePosition.X, MousePosition.Y)
+    local ray = Ray.new(mouseWorldPos.Origin, mouseWorldPos.Direction * 1000)
+
+    local partCFrame = Part.CFrame
+    local partSize = Part.Size
+
+    local localOrigin = partCFrame:PointToObjectSpace(ray.Origin)
+    
+    local halfSize = partSize / 2
+    local closestLocalPoint = Vector3.new(
+        math.clamp(localOrigin.X, -halfSize.X, halfSize.X),
+        math.clamp(localOrigin.Y, -halfSize.Y, halfSize.Y),
+        math.clamp(localOrigin.Z, -halfSize.Z, halfSize.Z)
+    )
+
+    local closestWorldPoint = partCFrame:PointToWorldSpace(closestLocalPoint)
+    
+    return closestWorldPoint
+end
+
+local function IsDowned(Character)
+    local bodyEffects = Character:FindFirstChild("BodyEffects")
+    return bodyEffects and bodyEffects:FindFirstChild("K.O") and bodyEffects["K.O"].Value
+end
+
+
+local function GetTargetPart(Character, checkType)
+    local config = Vanity[checkType]
+    if not Character then return nil, false end
+
+    if config.HitPart == "ClosestPart" then
+        return GetClosestPart(Character, UserInputService:GetMouseLocation()), false
+    elseif config.HitPart == "ClosestPoint" then
+        local closestPart = GetClosestPart(Character, UserInputService:GetMouseLocation())
+        if closestPart then
+            return GetClosestPointOnPart(closestPart, UserInputService:GetMouseLocation()), true
+        end
+        return Character:FindFirstChild("HumanoidRootPart"), true
+    elseif config.HitPart == "Random" then
+        return GetRandomPart(Character), false
+    else
+        local part = Character:FindFirstChild(config.HitPart)
+        if part then return part, false end
+        return Character:FindFirstChild("HumanoidRootPart"), true
+    end
+end
+
+
+local function IsInFOV(targetPos, checkType)
+    local fov = Vanity[checkType].FOV
+    if not fov.Enabled then return true end 
+
+    if fov.Mode == "2D" then
+        local mousePos = UserInputService:GetMouseLocation()
+        local screenPos, onScreen = Camera:WorldToViewportPoint(targetPos)
+        if not onScreen then return false end
+        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+        local radius = math.max(fov["2D"].X, fov["2D"].Y) 
+        return dist <= radius
+
+    elseif fov.Mode == "3D" then
+        local camPos = Camera.CFrame.Position
+        local dist = (targetPos - camPos).Magnitude
+        local maxDist = math.max(fov["3D"].X, fov["3D"].Y, fov["3D"].Z)
+        return dist <= maxDist
+    end
+
+    return true
+end
+
+local function GetClosestPlayer(checkType, targetOverride)
+    local config = Vanity[checkType]
+    if not config.Enabled or IsHoldingKnife(checkType) then
+        return nil, nil, false
+    end
+
+    if targetOverride then
+        local char = targetOverride.Character
+        if char then
+            local part, pointMode = GetTargetPart(char, checkType)
+            return part, targetOverride, pointMode
+        end
+        return nil, nil, false
+    end
+
+    local nearbyPlayers = {}
+    local myPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character.HumanoidRootPart.Position
+    if not myPos then return nil, nil, false end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local char = player.Character
+            local humanoid = char:FindFirstChild("Humanoid")
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if humanoid and hrp and (not config.HealthCheck or humanoid.Health > 0) then
+                if not config.WallCheck or not IsOccluded(hrp, char, checkType, false) then
+                    if Vanity.Mode['Target Mode'] == "Automatic" then
+                        if IsInFOV(hrp.Position, checkType) then
+                            table.insert(nearbyPlayers, player)
+                        end
+                    else
+                        table.insert(nearbyPlayers, player)
+                    end
+                end
+            end
+        end
+    end
+
+    if #nearbyPlayers == 0 then
+        return nil, nil, false
+    end
+
+local closestDistance, closestPlayer = math.huge, nil
+local myPos = LocalPlayer.Character.HumanoidRootPart.Position
+
+for _, player in ipairs(nearbyPlayers) do
+    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local dist = (hrp.Position - myPos).Magnitude
+        if dist < closestDistance then
+            closestDistance = dist
+            closestPlayer = player
+        end
+    end
+end
+
+if not closestPlayer then
+    return nil, nil, false
+end
+
+local targetPart, isClosestPoint = GetTargetPart(closestPlayer.Character, checkType)
+return targetPart, closestPlayer, isClosestPoint
+
+end
+
+local function GetClosestPlayerToMouse()
+    local closestDistance, closestPlayer = math.huge, nil
+    local mousePos = UserInputService:GetMouseLocation()
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local hrp = player.Character.HumanoidRootPart
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                if not IsOccluded(hrp, player.Character, "SilentAim", false) then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+                    if onScreen then
+                        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                        if dist < closestDistance then
+                            closestDistance = dist
+                            closestPlayer = player
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+
+local predictionMode = 1 
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode[Vanity.SilentAim.Predictions.ToggleKey] then
+        predictionMode = predictionMode + 1
+        if predictionMode > 3 then predictionMode = 1 end
+
+if predictionMode == 1 then
+    Vanity.SilentAim.Prediction.Enabled = true
+    Vanity.SilentAim.Predictions.Enabled = false
+elseif predictionMode == 2 then
+    Vanity.SilentAim.Prediction.Enabled = false
+    Vanity.SilentAim.Predictions.Enabled = true
+else
+    Vanity.SilentAim.Prediction.Enabled = false
+    Vanity.SilentAim.Predictions.Enabled = false
+        end
+    end
+end)
+
+--[[local function ApplyPrediction(Target, checkType, IsClosestPoint)
+    if not Target or not Target.Parent then return nil end
+    local config = Vanity[checkType]
+    local Character = Target.Parent
+    local position = Target.Position or Vector3.new(0,0,0)
+    if IsDowned(Character) then
+        return GetClosestPointOnPart(Target, UserInputService:GetMouseLocation())
+    end
+
+    if config.Prediction.Enabled then
+        local Velocity = Target.Velocity or Vector3.new(0,0,0)
+        return position + Vector3.new(
+            Velocity.X * config.Prediction.X,
+            Velocity.Y * config.Prediction.Y,
+            Velocity.Z * config.Prediction.Z
+        )
+    elseif config.Predictions.Enabled then
+        local Velocity = Target.Velocity or Vector3.new(0,0,0)
+        return position + Target.Velocity.Unit * config.Predictions.Amount
+    end
+
+    return Target.Position
+end--]] -- OLD APPLY PREDICTION FUNCTION
+
+local function ApplyPrediction(Target, checkType, IsClosestPoint)
+    if not Target or not Target.Parent then return nil end
+
+    local config = Vanity[checkType]
+    local Character = Target.Parent
+
+    -- Always hit HumanoidRootPart if that's the hit part
+    local hitPartName = config.HitPart
+    local partToHit = Character:FindFirstChild(hitPartName)
+
+    if not partToHit then
+        partToHit = Character:FindFirstChild("HumanoidRootPart")
+    end
+
+    return partToHit.Position -- ignore all prediction, velocity, randomness
+end
+
+
+local isTargetLocked = false
+local allconfig = getgenv().Vanity
+local targetlineColor = Color3.fromRGB(255,0,0)
+local line = Drawing.new("Line")
+line.Visible = false
+line.Color = targetlineColor
+line.Thickness = 1
+
+local currentTarget = nil
+local TargetPart, TargetPlayer, IsClosestPoint = nil, nil, false
+local function updateTargetLine()
+    if not Vanity or not Vanity.Mode or not line or not Vanity.SilentAim["Target Lines"] then return end
+
+    local mode = Vanity.Mode["Target Mode"]
+    local target
+    if mode == "Target" and currentTarget then
+        target = currentTarget
+    elseif mode == "Automatic" then
+        target = GetClosestPlayerToMouse()
+    end
+
+    if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+        local part = target.Character.HumanoidRootPart
+        local predictedPos = ApplyPrediction(part, "SilentAim")
+        local screenPos, onScreen = Camera:WorldToViewportPoint(predictedPos or part.Position)
+        local mousePos = UserInputService:GetMouseLocation()
+
+local targetLineConfig = Vanity.SilentAim["Target Lines"]
+if onScreen and targetLineConfig.Visible then
+    line.From = Vector2.new(mousePos.X, mousePos.Y)
+    line.To = Vector2.new(screenPos.X, screenPos.Y)
+    line.Color = targetLineConfig.Regular or Color3.fromRGB(255, 0, 0)
+    line.Visible = true
+else
+    line.Visible = false
+end
+end
+end
+RunService.RenderStepped:Connect(updateTargetLine)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode.Name == Vanity.SilentAim.Binds and Vanity.Mode['Target Mode'] == "Target" then
+        if isTargetLocked then
+            isTargetLocked = false
+            currentTarget = nil
+            TargetPlayer = nil
+            TargetPart = nil
+            IsClosestPoint = false
+
+            if line then
+                line.Visible = false
+            end
+        else
+            local playerTarget = GetClosestPlayerToMouse()
+            if playerTarget and playerTarget.Character then
+                currentTarget = playerTarget
+                TargetPlayer = playerTarget
+                TargetPart, IsClosestPoint = GetTargetPart(playerTarget.Character, "SilentAim")
+                isTargetLocked = true
+            end
+        end
+    end
+end)
+
+local function IsMouseOverTarget()
+    if IsHoldingKnife("TriggerBot") then return false, nil end
+
+    local target = Mouse.Target
+    if not target then return false, nil end
+
+    local model = target:FindFirstAncestorOfClass("Model")
+    if not model then return false, nil end
+    if not model:FindFirstChild("HumanoidRootPart") then return false, nil end
+
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    if not humanoid or model == LocalPlayer.Character then return false, nil end
+
+    local player = Players:GetPlayerFromCharacter(model)
+    if not player then return false, nil end
+
+    if Vanity.TriggerBot.HealthCheck and humanoid.Health <= 0 then return false, nil end
+
+    local bodyEffects = model:FindFirstChild("BodyEffects")
+    local isKnocked = bodyEffects and bodyEffects:FindFirstChild("K.O") and bodyEffects["K.O"].Value
+    local isGrabbed = model:FindFirstChild("GRABBING_CONSTRAINT") ~= nil
+    if isKnocked or isGrabbed then return false, nil end
+
+local targetPart, isClosestPoint = GetTargetPart(model, "TriggerBot")
+
+if targetPart then
+    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+    if not onScreen then
+        targetPart = nil
+        isClosestPoint = false
+    end
+end
+
+if not targetPart and currentTarget and currentTarget.Character then
+    local hrp = currentTarget.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+        if onScreen then
+            targetPart = hrp
+            isClosestPoint = false
+        end
+    end
+end
+
+
+if not targetPart and currentTarget and currentTarget.Character then
+    local hrp = currentTarget.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+        if onScreen then
+            targetPart = hrp
+            isClosestPoint = false
+        end
+    end
+end
+ 
+    
+
+    if Vanity.TriggerBot.WallCheck and IsOccluded(targetPart, model, "TriggerBot", isClosestPoint) then
+        return false, nil
+    end
+
+    return true, model
+end
+
+local function MoveMouseToPosition(position)
+    local success, screenPos, onScreen = pcall(function()
+        return Camera:WorldToScreenPoint(position)
+    end)
+    if success and onScreen then
+        local successInput, errorMsg = pcall(function()
+            VirtualInputManager:SendMouseMoveEvent(screenPos.X, screenPos.Y, game)
+        end)
+        if not successInput then
+        end
+    end
+end
+
+local function StartShooting()
+    if not isShooting then
+        local success, errorMsg = pcall(function()
+            VirtualInputManager:SendMouseButtonEvent(Mouse.X, Mouse.Y, 0, true, game, 0)
+        end)
+        if success then
+            isShooting = true
+        else
+            warn("[TriggerBot] Failed to start shooting: " .. tostring(errorMsg))
+        end
+    end
+end
+
+local function StopShooting()
+    if isShooting then
+        local success, errorMsg = pcall(function()
+            VirtualInputManager:SendMouseButtonEvent(Mouse.X, Mouse.Y, 0, false, game, 0)
+        end)
+        if success then
+            isShooting = false
+        else
+            warn("[TriggerBot] Failed to stop shooting: " .. tostring(errorMsg))
+        end
+    end
+end
+
+
+local walkSpeedConfig = getgenv().Vanity.WalkSpeed
+local walkSpeedEnabled = walkSpeedConfig.Enabled
+local walkSpeedValue = walkSpeedConfig.Speed
+local humanoid
+local originalSpeed
+local changedConnection
+
+local function setupWalkSpeed(hum)
+    if not hum then return end
+    humanoid = hum
+    originalSpeed = humanoid.WalkSpeed
+
+    if changedConnection then
+        changedConnection:Disconnect()
+        changedConnection = nil
+    end
+
+    changedConnection = humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+        if walkSpeedEnabled then
+            humanoid.WalkSpeed = walkSpeedValue
+        end
+    end)
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    local hum = char:WaitForChild("Humanoid")
+    setupWalkSpeed(hum)
+end)
+
+if LocalPlayer.Character then
+    setupWalkSpeed(LocalPlayer.Character:FindFirstChildOfClass("Humanoid"))
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode.Name == walkSpeedConfig.Binds then 
+        walkSpeedEnabled = not walkSpeedEnabled
+        if humanoid then
+            humanoid.WalkSpeed = walkSpeedEnabled and walkSpeedValue or originalSpeed
+        end
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if humanoid and walkSpeedEnabled and humanoid.WalkSpeed ~= walkSpeedValue then
+        humanoid.WalkSpeed = walkSpeedValue
+    end
+end)
+
+
+local function setupCamlock()
+    local Mouse = LocalPlayer:GetMouse()
+
+    local camlockEnabled = false
+    local camlockTarget = nil
+
+--[[    local function getPredictedPosition(part)
+        if not part or not part.Parent then return part.Position end
+        local velocity = part.Velocity or Vector3.new(0,0,0)
+        local pred = Vanity.Camlock.Prediction
+        return part.Position + Vector3.new(
+            velocity.X * (pred.Enabled and pred.X or 0),
+            velocity.Y * (pred.Enabled and pred.Y or 0),
+            velocity.Z * (pred.Enabled and pred.Z or 0)
+        )
+    end--]] -- OLD ONE MIGHT BE USE IN A MINUTES!
+
+    local function getPredictedPosition(part)
+    if not part or not part.Parent then return part.Position end
+    return part.Position
+end
+
+    local function getPlayerFromMouse()
+        local target = Mouse.Target
+        if not target then return nil end
+        local char = target:FindFirstAncestorOfClass("Model")
+        if char and Players:GetPlayerFromCharacter(char) and char ~= LocalPlayer.Character then
+            return Players:GetPlayerFromCharacter(char)
+        end
+        return nil
+    end
+    RunService.RenderStepped:Connect(function()
+        if camlockEnabled and camlockTarget and camlockTarget.Character and camlockTarget.Character:FindFirstChild(Vanity.Camlock.HitPart) then
+            local part = camlockTarget.Character:FindFirstChild(Vanity.Camlock.HitPart)
+            local targetPos = getPredictedPosition(part)
+            local lerpTime = math.clamp(Vanity.Camlock.Time, 0.01, 1)
+
+            Camera.CFrame = Camera.CFrame:Lerp(CFrame.lookAt(Camera.CFrame.Position, targetPos), lerpTime)
+        end
+    end)
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.KeyCode == Vanity.Camlock.Binds then
+            if camlockEnabled then
+                camlockEnabled = false
+                camlockTarget = nil
+            else
+                local target = getPlayerFromMouse()
+                if target then
+                    camlockTarget = target
+                    camlockEnabled = true
+                end
+            end
+        end
+    end)
+end
+
+local function cleanup()
+    if silentAimConnection then
+        silentAimConnection:Disconnect()
+        silentAimConnection = nil
+    end
+    if camlockConnection then
+        camlockConnection:Disconnect()
+        camlockConnection = nil
+    end
+    if camlockToggleConnection then
+        camlockToggleConnection:Disconnect()
+        camlockToggleConnection = nil
+    end
+    if triggerBotConnection then
+        triggerBotConnection:Disconnect()
+        triggerBotConnection = nil
+    end
+    if triggerBotToggleConnection then
+        triggerBotToggleConnection:Disconnect()
+        triggerBotToggleConnection = nil
+    end
+    if walkSpeedConnection then
+        walkSpeedConnection:Disconnect()
+        walkSpeedConnection = nil
+    end
+    if camlockTween then
+        camlockTween:Cancel()
+        camlockTween = nil
+    end
+    if originalIndex and getgenv().Vanity._metatableHooked then
+        local success, result = pcall(function() return getrawmetatable(game) end)
+local grm = success and result or nil
+        if success and grm and setreadonly then
+            setreadonly(grm, false)
+            grm.__index = originalIndex
+            setreadonly(grm, true)
+        end
+        getgenv().Vanity._metatableHooked = false
+    end
+    if isShooting then
+        StopShooting()
+    end
+    isCamlockToggled = false
+    camlockTarget = { Player = nil, TargetPart = nil, IsClosestPoint = false }
+end
+getgenv().Vanity._cleanup = cleanup
+getgenv().Vanity._metatableHooked = false
+
+local function setupSilentAim()
+    local success, result = pcall(function()
+        return getrawmetatable(game)
+    end)
+    local grm = success and result or nil
+
+    if not (success and grm and grm.__index and setreadonly) then
+        warn("[Vanity] Metatable hooking not supported. Silent Aim disabled.")
+        Vanity.SilentAim.Enabled = false
+        return
+    end
+
+    originalIndex = grm.__index
+    setreadonly(grm, false)
+
+grm.__index = function(self, k)
+    if not checkcaller() and self and (k == "Hit" or k == "Target") and Vanity.SilentAim.Enabled then
+        local TargetPart, TargetPlayer, IsClosestPoint
+
+        -- Always pick currentTarget or closest player
+        if Vanity.Mode['Target Mode'] == "Target" and currentTarget then
+            TargetPart, TargetPlayer, IsClosestPoint = GetClosestPlayer("SilentAim", currentTarget)
+        elseif Vanity.Mode['Target Mode'] == "Automatic" then
+            TargetPart, TargetPlayer, IsClosestPoint = GetClosestPlayer("SilentAim")
+        end
+
+        if TargetPart then
+            -- Force bullet to go straight to HumanoidRootPart
+            local predictedPos = TargetPart.Position
+            return CFrame.new(predictedPos)
+        end
+    end
+
+    return originalIndex(self, k)
+end
+
+
+
+    getgenv().Vanity._metatableHooked = true
+    setreadonly(grm, true)
+end
+
+local function setupTriggerBot()
+    if triggerBotToggleConnection then
+        triggerBotToggleConnection:Disconnect()
+        triggerBotToggleConnection = nil
+    end
+    if triggerBotConnection then
+        triggerBotConnection:Disconnect()
+        triggerBotConnection = nil
+    end
+
+    triggerBotToggleConnection = UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+        if not gameProcessedEvent and input.KeyCode == Vanity.TriggerBot.Binds then
+            Vanity.TriggerBot.Enabled = not Vanity.TriggerBot.Enabled
+            if not Vanity.TriggerBot.Enabled then
+                StopShooting()
+            end
+        end
+    end)
+
+    local lastShotTime = 0
+    triggerBotConnection = RunService.RenderStepped:Connect(function(deltaTime)
+        if not Vanity.TriggerBot.Enabled then
+            StopShooting()
+            return
+        end
+
+        if tick() - lastShotTime < Vanity.TriggerBot.Delay then
+            return
+        end
+
+        local isValid, targetModel = IsMouseOverTarget()
+        local targetPlayer = targetModel and Players:GetPlayerFromCharacter(targetModel)
+
+        if Vanity.Mode['Target Mode'] == "Target" and not currentTarget then
+            StopShooting()
+            return
+        end
+
+        if isValid and (Vanity.Mode['Target Mode'] ~= "Target" or targetPlayer == currentTarget) then
+            local targetPart, isClosestPoint = GetTargetPart(targetModel, "TriggerBot")
+            if targetPart then
+                local targetPos = ApplyPrediction(targetPart, "TriggerBot", isClosestPoint)
+                MoveMouseToPosition(targetPos)
+                StartShooting()
+                lastShotTime = tick()
+            end
+        else
+            StopShooting()
+        end
+    end)
+end
+
+if Vanity.SilentAim.Enabled then
+    setupSilentAim()
+end
+if Vanity.Camlock.Enabled then
+    setupCamlock()
+end
+if Vanity.TriggerBot.Enabled then
+    setupTriggerBot()
+end
+if Vanity.WalkSpeed.Enabled then
+    setupWalkSpeed()
+end
+
+local function UpdateSettings(NewSettings)
+    for Key, Value in pairs(NewSettings) do
+        if Key == "SilentAim" or Key == "Camlock" or Key == "TriggerBot" or Key == "WalkSpeed" then
+            for SubKey, SubValue in pairs(Value) do
+                if SubKey == "HitPart" and (Key == "SilentAim" or Key == "Camlock" or Key == "TriggerBot") then
+                    local validParts = {
+                        "Head","HumanoidRootPart","Torso","UpperTorso","LowerTorso",
+                        "LeftUpperArm","LeftLowerArm","LeftHand","RightUpperArm","RightLowerArm","RightHand",
+                        "LeftUpperLeg","LeftLowerLeg","LeftFoot","RightUpperLeg","RightLowerLeg","RightFoot",
+                        "Left Arm","Right Arm","Left Leg","Right Leg"
+                    }
+                    if not table.find(validParts, SubValue) then
+                        warn("[Vanity] Invalid HitPart for " .. Key .. ". Use a valid R6/R15 body part.")
+                    else
+                        Vanity[Key][SubKey] = SubValue
+                    end
+                elseif SubKey == "Binds" and (Key == "Camlock" or Key == "TriggerBot" or Key == "WalkSpeed") then
+                    if typeof(SubValue) ~= "EnumItem" then
+                        warn("[Vanity] Invalid Binds for " .. Key .. ". Use a valid Enum.KeyCode.")
+                    else
+                        Vanity[Key][SubKey] = SubValue
+                    end
+                elseif SubKey == "Time" and Key == "Camlock" then
+                    if type(SubValue) ~= "number" then
+                        warn("[Vanity] Invalid Time for Camlock. Must be a number.")
+                    else
+                        Vanity[Key][SubKey] = SubValue
+                    end
+                elseif SubKey == "Prediction" and (Key == "SilentAim" or Key == "Camlock" or Key == "TriggerBot") and type(SubValue) == "table" then
+                    for PredKey, PredValue in pairs(SubValue) do
+                        if PredKey == "X" or PredKey == "Y" or PredKey == "Z" then
+                            if type(PredValue) ~= "number" then
+                                warn("[Vanity] Invalid Prediction." .. PredKey .. " for " .. Key .. ". Must be a number.")
+                            else
+                                Vanity[Key][SubKey][PredKey] = PredValue
+                            end
+                        elseif PredKey == "Enabled" then
+                            if type(PredValue) ~= "boolean" then
+                                warn("[Vanity] Invalid Prediction.Enabled for " .. Key .. ". Must be a boolean.")
+                            else
+                                Vanity[Key][SubKey][PredKey] = PredValue
+                            end
+                        else
+                            warn("[Vanity] Invalid Prediction key for " .. Key .. ": " .. PredKey)
+                        end
+                    end
+                elseif SubKey == "FOV" and Key == "SilentAim" and type(SubValue) == "table" then
+                    for FOVKey, FOVValue in pairs(SubValue) do
+                        Vanity[Key][SubKey][FOVKey] = FOVValue
+                    end
+                elseif (SubKey == "FastSpeed" or SubKey == "SlowSpeed") and Key == "WalkSpeed" then
+                    if type(SubValue) ~= "number" then
+                        warn("[Vanity] Invalid " .. SubKey .. " for " .. Key .. ". Must be a number.")
+                    else
+                        Vanity[Key][SubKey] = SubValue
+                    end
+                else
+                    Vanity[Key][SubKey] = SubValue
+                end
+            end
+        else
+            warn("[Vanity] Invalid setting key: " .. Key)
+        end
+    end
+end
+
+getgenv().Loaded = true
