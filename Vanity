@@ -81,4 +81,4 @@ getgenv().Vanity = {
         ['Speed'] = 1700
     }
 }
-loadstring(game:HttpGet("https://greetingsthatended/script/refs/heads/main/vanity?token=GHSAT0AAAAAADPAACSEJBLQ3VSZPDSZMWCU2IVBVIQ"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/greetingsthatended/script/refs/heads/main/vanity?token=GHSAT0AAAAAADPAACSEJBLQ3VSZPDSZMWCU2IVBVIQ"))()
