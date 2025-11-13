@@ -1,5 +1,3 @@
-
-
 -- CONFIG
 local DISCORD_KEY = "" -- Key Here
 local SCRIPT_ENDPOINT = "https://unpecked-julieann-semiconvergence.ngrok-free.dev" -- DO NOT TOUCH
