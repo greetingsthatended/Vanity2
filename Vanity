@@ -1,8 +1,8 @@
 -- CONFIG
-local DISCORD_KEY = "" -- Key Here
+local DISCORD_KEY = "" -- Put your key here if you want to auto-set
 local SCRIPT_ENDPOINT = "https://unpecked-julieann-semiconvergence.ngrok-free.dev" -- DO NOT TOUCH
 
--- PROMPT USER IF NO KEY SET -- DONT TOUCH
+-- PROMPT USER IF NO KEY SET
 if DISCORD_KEY == "" then
     DISCORD_KEY = game:GetService("Players").LocalPlayer:PromptInput("Enter your Vanity Discord Key:")
 end
@@ -10,70 +10,64 @@ end
 -- SET UP VANITY CONFIG
 getgenv().Vanity = {
     Key = DISCORD_KEY,
-    ['Mode'] = {
-        ['Target Mode'] = "Target", 
-        ['Type'] = "Toggle",
-        ['Binds'] = "M"
+    Mode = {
+        ["Target Mode"] = "Target", 
+        ["Type"] = "Toggle",
+        ["Binds"] = "M"
     },
-    ['SilentAim'] = {
-        ['Enabled'] = true,
-        ['Binds'] = "Q",
-        ['HitPart'] = "HumanoidRootPart",
-        ['HealthCheck'] = true,
-        ['KnifeCheck'] = true,
-        ['Target Lines'] = {
-            ['Visible'] = true,
-            ['Regular'] = Color3.fromRGB(255, 0, 0)
-        },
-        ['WallCheck'] = true,
-        ['Prediction'] = {
-            ['Enabled'] = true,
-            ['X'] = 0,
-            ['Y'] = 0,
-            ['Z'] = 0
-        },
-        ['Predictions'] = {
-            ['Enabled'] = true,
-            ['ToggleKey'] = "N",
-            ['Amount'] = 0
-        },
-        ['FOV'] = { 
-            ['Enabled'] = true,
-            ['Visible'] = false,
-            ['Scan'] = math.huge,
-            ['Mode'] = '2D', 
-            ['2D'] = { ['X'] = 50, ['Y'] = 50 },
-            ['3D'] = { ['Prediction'] = false, ['X'] = 50, ['Y'] = 50, ['Z'] = 50 },
-        },
+    SilentAim = {
+        Enabled = true,
+        Binds = "Q",
+        HitPart = "HumanoidRootPart",
+        HealthCheck = true,
+        KnifeCheck = true,
+        ["Target Lines"] = { Visible = true, Regular = Color3.fromRGB(255,0,0) },
+        WallCheck = true,
+        Prediction = { Enabled = true, X=0, Y=0, Z=0 },
+        Predictions = { Enabled = true, ToggleKey="N", Amount=0 },
+        FOV = { Enabled=true, Visible=false, Scan=math.huge, Mode='2D', 
+                ["2D"]={X=50,Y=50}, ["3D"]={Prediction=false,X=50,Y=50,Z=50} },
     },
-    ['Camlock'] = {
-        ['Enabled'] = false,
-        ['Binds'] = "C", 
-        ['Time'] = 0.065, 
-        ['HitPart'] = "HumanoidRootPart",
-        ['HealthCheck'] = true,
-        ['KnifeCheck'] = true,
-        ['WallCheck'] = true,
-        ['Prediction'] = { ['Enabled'] = true, ['X'] = 0.24434, ['Y'] = 0.24434, ['Z'] = 0.24434 }
+    Camlock = {
+        Enabled = false,
+        Binds = "C",
+        Time = 0.065,
+        HitPart = "HumanoidRootPart",
+        HealthCheck = true,
+        KnifeCheck = true,
+        WallCheck = true,
+        Prediction = { Enabled=true, X=0.24434, Y=0.24434, Z=0.24434 },
     },
-    ['TriggerBot'] = {
-        ['Enabled'] = true,
-        ['Binds'] = "T", 
-        ['Delay'] = 0.01,
-        ['Prediction'] = { ['Enabled'] = true, ['X'] = 0.1, ['Y'] = 0.1, ['Z'] = 0.1 },
-        ['WallCheck'] = true,
-        ['HealthCheck'] = true,
-        ['KnifeCheck'] = true,
+    TriggerBot = {
+        Enabled = true,
+        Binds = "T",
+        Delay = 0.01,
+        Prediction = { Enabled=true, X=0.1, Y=0.1, Z=0.1 },
+        WallCheck = true,
+        HealthCheck = true,
+        KnifeCheck = true,
     },
-    ['WalkSpeed'] = {
-        ['Enabled'] = false,
-        ['Binds'] = "V",
-        ['Speed'] = 1700
+    WalkSpeed = {
+        Enabled = false,
+        Binds = "V",
+        Speed = 1700,
     }
 }
-loadstring(game:HttpGet("https://raw.githubusercontent.com/greetingsthatended/script/refs/heads/main/vanity?token=GHSAT0AAAAAADPAACSEJBLQ3VSZPDSZMWCU2IVBVIQ"))()
 
--- VALIDATE KEY & LOAD SCRIPT
+-- SAFE LOAD EXTERNAL SCRIPT
+local function safeLoadURL(url)
+    local success, result = pcall(function()
+        local code = game:HttpGet(url)
+        return loadstring(code)()
+    end)
+    if not success then
+        warn("[Vanity Loader] Failed to load script:", result)
+        return false
+    end
+    return true
+end
+
+-- VALIDATE KEY & LOAD SCRIPT FROM SERVER
 local function loadVanityScript(key)
     local url = SCRIPT_ENDPOINT .. "?key=" .. key
     local success, response = pcall(function()
@@ -85,19 +79,17 @@ local function loadVanityScript(key)
         return false
     end
 
-    -- Check for invalid key or blacklisted
     if response:find("Invalid key") or response:find("blacklisted") then
         warn("[Vanity Loader] Key is invalid or blacklisted.")
         return false
     end
 
-    -- Execute the Vanity script
     local ok, err = pcall(function()
         loadstring(response)()
     end)
 
     if not ok then
-        warn("[Vanity Loader] Failed to execute script:", err)
+        warn("[Vanity Loader] Failed to execute server script:", err)
         return false
     end
 
