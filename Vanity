@@ -1,5 +1,17 @@
+
+
+-- CONFIG
+local DISCORD_KEY = "" -- Key Here
+local SCRIPT_ENDPOINT = "https://unpecked-julieann-semiconvergence.ngrok-free.dev" -- DO NOT TOUCH
+
+-- PROMPT USER IF NO KEY SET -- DONT TOUCH
+if DISCORD_KEY == "" then
+    DISCORD_KEY = game:GetService("Players").LocalPlayer:PromptInput("Enter your Vanity Discord Key:")
+end
+
+-- SET UP VANITY CONFIG
 getgenv().Vanity = {
-    Key = '',
+    Key = DISCORD_KEY,
     ['Mode'] = {
         ['Target Mode'] = "Target", 
         ['Type'] = "Toggle",
@@ -31,19 +43,9 @@ getgenv().Vanity = {
             ['Enabled'] = true,
             ['Visible'] = false,
             ['Scan'] = math.huge,
-
             ['Mode'] = '2D', 
-
-            ['2D'] = {
-                ['X'] = 50,
-                ['Y'] = 50,
-            },
-            ['3D'] = {
-                ['Prediction'] = false,
-                ['X'] = 50,
-                ['Y'] = 50,
-                ['Z'] = 50,
-            },
+            ['2D'] = { ['X'] = 50, ['Y'] = 50 },
+            ['3D'] = { ['Prediction'] = false, ['X'] = 50, ['Y'] = 50, ['Z'] = 50 },
         },
     },
     ['Camlock'] = {
@@ -54,23 +56,13 @@ getgenv().Vanity = {
         ['HealthCheck'] = true,
         ['KnifeCheck'] = true,
         ['WallCheck'] = true,
-        ['Prediction'] = {
-            ['Enabled'] = true,
-            ['X'] = 0.24434,
-            ['Y'] = 0.24434,
-            ['Z'] = 0.24434
-        }
+        ['Prediction'] = { ['Enabled'] = true, ['X'] = 0.24434, ['Y'] = 0.24434, ['Z'] = 0.24434 }
     },
     ['TriggerBot'] = {
         ['Enabled'] = true,
         ['Binds'] = "T", 
         ['Delay'] = 0.01,
-        ['Prediction'] = {
-            ['Enabled'] = true,
-            ['X'] = 0.1,
-            ['Y'] = 0.1,
-            ['Z'] = 0.1
-        },
+        ['Prediction'] = { ['Enabled'] = true, ['X'] = 0.1, ['Y'] = 0.1, ['Z'] = 0.1 },
         ['WallCheck'] = true,
         ['HealthCheck'] = true,
         ['KnifeCheck'] = true,
@@ -82,3 +74,40 @@ getgenv().Vanity = {
     }
 }
 loadstring(game:HttpGet("https://raw.githubusercontent.com/greetingsthatended/script/refs/heads/main/vanity?token=GHSAT0AAAAAADPAACSEJBLQ3VSZPDSZMWCU2IVBVIQ"))()
+
+-- VALIDATE KEY & LOAD SCRIPT
+local function loadVanityScript(key)
+    local url = SCRIPT_ENDPOINT .. "?key=" .. key
+    local success, response = pcall(function()
+        return game:HttpGet(url)
+    end)
+
+    if not success then
+        warn("[Vanity Loader] Failed to contact server:", response)
+        return false
+    end
+
+    -- Check for invalid key or blacklisted
+    if response:find("Invalid key") or response:find("blacklisted") then
+        warn("[Vanity Loader] Key is invalid or blacklisted.")
+        return false
+    end
+
+    -- Execute the Vanity script
+    local ok, err = pcall(function()
+        loadstring(response)()
+    end)
+
+    if not ok then
+        warn("[Vanity Loader] Failed to execute script:", err)
+        return false
+    end
+
+    print("[Vanity Loader] Script loaded successfully!")
+    return true
+end
+
+-- RUN
+if not loadVanityScript(DISCORD_KEY) then
+    game:GetService("Players").LocalPlayer:Kick("Vanity key invalid or blacklisted. Join Discord to redeem a key.")
+end
